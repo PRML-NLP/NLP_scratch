@@ -8,7 +8,6 @@ scripts
 ├── metrics
 ├── <[inference_for_each_task].py> ex) chit_chat.py, translate.py and classify_doc.py
 └── <train_[task_name].py>... ex) train_summarization.py
-└── utils: codes for utility and processing operation such as TF-IDF and download_dataset
-	└── crawling: data collection codes from internet
+└── utils: codes for utility and processing operation such as TF-IDF and crawler
 ~~~
 

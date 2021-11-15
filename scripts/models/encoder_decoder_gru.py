@@ -4,7 +4,7 @@ import sys
 import os
 from torch.utils import data
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
-from data.data_preprocess import read_data_nmt, preprocess_nmt, tokenize_nmt
+from utils.data_preprocess import read_data_nmt, preprocess_nmt, tokenize_nmt
 from data.Vocabulary import Vocab_nmt
 
 """Embedding words"""

@@ -3,11 +3,9 @@ import sys
 
 data_type = ''
 
-
-
 if data_type == 'NMT':
     def read_data_nmt():
-        with open(os.path.join('', 'data/kor.txt'), 'r') as f:
+        with open(os.path.join('', '../data/kor.txt'), 'r') as f:
             return f.read()
         
     def preprocess_nmt(text):

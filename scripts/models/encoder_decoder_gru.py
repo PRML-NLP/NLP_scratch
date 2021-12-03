@@ -5,7 +5,7 @@ import os
 from torch.utils import data
 sys.path.append(os.path.dirname(os.path.abspath(os.path.dirname(__file__))))
 from utils.data_preprocess import read_data_nmt, preprocess_nmt, tokenize_nmt
-from data.NMT_data.vocabulary import Vocab_nmt
+from data.vocabulary import Vocab_nmt
 from torch.nn import functional as F
 from pytorch_lightning.core.lightning import LightningModule
 import pytorch_lightning as pl
@@ -130,16 +130,17 @@ class MaskedSoftmaxCELoss(nn.CrossEntropyLoss):
 """ Torch Lightning """
 
 class NMTEncoderDecoder(LightningModule):
-    def __init__(self,encoder,decoder,tgt_vocab,src_vocab):
+    def __init__(self,encoder,decoder,tgt_vocab,src_vocab,lr):
         super().__init__()
         self.encoder = encoder
         self.decoder = decoder
         self.tgt_vocab = tgt_vocab
         self.src_vocab = src_vocab
+        self.lr = lr
     
     def configure_optimizers(self):
         # optimizer = torch.optim.Adam(net.parameters(), lr=lr)
-        return torch.optim.Adam(self.parameters(), lr=1e-3)
+        return torch.optim.Adam(self.parameters(), lr=self.lr)
     
 
     def training_step(self, batch, batch_idx):
@@ -190,7 +191,7 @@ train_iter, src_vocab, tgt_vocab = load_data_nmt(batch_size, num_steps)
 encoder = Encoder_nmt(len(src_vocab), embed_size, num_hiddens, num_layers,dropout)
 decoder = Decoder_nmt(len(tgt_vocab), embed_size, num_hiddens, num_layers,dropout)
         
-nmt = NMTEncoderDecoder(encoder,decoder,tgt_vocab,src_vocab)
+nmt = NMTEncoderDecoder(encoder,decoder,tgt_vocab,src_vocab,lr)
 trainer = pl.Trainer(max_epochs=num_epochs)
 #trainer.fit(nmt, train_iter, pred_iter)
 trainer.fit(nmt, train_iter)

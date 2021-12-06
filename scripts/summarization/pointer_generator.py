@@ -165,7 +165,10 @@ class Decoder(nn.Module):
         p_gen = torch.sigmoid(self.w_p_gen(torch.cat([c_t, s_t_hat, embedded], dim=-1)))
         P_vocab = F.softmax(self.V_prime(self.V(torch.cat([s_t_tilde.squeeze(1), c_t], dim=-1))),dim=1)
         
-        P_w = p_gen*P_vocab + (1.-p_gen)*attn_dist
+        P_vocab_ = p_gen*P_vocab
+        attn_dist_ = (1.-p_gen)*attn_dist
+        
+        return P_w, attn_dist, coverage_next
       
 
 class PointerGenerator(nn.Module):
@@ -176,7 +179,7 @@ class PointerGenerator(nn.Module):
         self.decoder = Decoder(vocab_size, emb_dim, hidden_dim, dec_n_layers)
         self.reducer = ReduceState(hidden_dim)
     
-    def forward(self, source, target, max_dec_len):
+    def forward(self, source, target, max_dec_len, cov_coef=1.0):
         src_lens = [seq.size(0) for seq in source]
         source = pad_sequence(source, batch_first=True)
         h, enc_hidden_state = self.encoder(source, src_lens)
@@ -186,9 +189,20 @@ class PointerGenerator(nn.Module):
         c_t_pre = h.new(h.size(0), 2*self.hidden_dim)
         coverage = h.new(h.size(0), h.size(1)).zero_()
         
+        step_losses = []
         for step in range(max_dec_len):
             y_t_pre = target[:,step]
-            self.decoder(h, enc_hidden_state, y_t_pre, c_t_pre, coverage)
+            P_w, attn_dist, next_coverage = self.decoder(h, enc_hidden_state, y_t_pre, c_t_pre, coverage)
+            # Get probability corresponding to target label
+            P_w = torch.gather(P_w, 1, y_t_pre.unsqueeze(1)).squeeze()
+            covloss = torch.sum(torch.min(attn_dist, coverage), dim=1)
+            lm_loss = -torch.log(P_w + 1e-12)
+            step_losses.append(lm_loss + cov_coef*covloss)
+            coverage = next_coverage
+        
+        loss = torch.sum(torch.stack(step_losses, 1), 1)
+        
+            
         
         
 if __name__=='__main__':

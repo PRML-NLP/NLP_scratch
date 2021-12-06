@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.nn import init
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence, pad_sequence
 import torch.nn.functional as F
+from torch.autograd import Variable
 
 def init_lstm_weights(lstm, rand_unif_init_mag):
     for names in lstm._all_weights:
@@ -146,7 +147,7 @@ class Decoder(nn.Module):
         init_linear_weights(self.V_prime, trunc_norm_init_std)
         init_lstm_weights(self.lstm, rand_unif_init_mag)
                         
-    def forward(self, h, s_t_prev, y_t_prev, c_t_pre, coverage):
+    def forward(self, h, s_t_prev, y_t_prev, c_t_pre, coverage, extra_zeros=None, source_extend_vocab=None):
         embedded = self.embedding(y_t_prev)
         
         # h_pre,c_pre = s_t_prev
@@ -165,34 +166,45 @@ class Decoder(nn.Module):
         p_gen = torch.sigmoid(self.w_p_gen(torch.cat([c_t, s_t_hat, embedded], dim=-1)))
         P_vocab = F.softmax(self.V_prime(self.V(torch.cat([s_t_tilde.squeeze(1), c_t], dim=-1))),dim=1)
         
-        P_vocab_ = p_gen*P_vocab
+        P_vocab = p_gen*P_vocab
         attn_dist_ = (1.-p_gen)*attn_dist
+        if extra_zeros is not None:
+            P_vocab_ = torch.cat([P_vocab, extra_zeros])
+        # if w is oov, largest attn_dist value is added to extended vocab dim
+        P_w = P_vocab.scatter_add(1, source_extend_vocab, attn_dist_) # vocab + oov
         
         return P_w, attn_dist, coverage_next
       
 
 class PointerGenerator(nn.Module):
-    def __init__(self, vocab_size, emb_dim, hidden_dim, enc_n_layers=1, dec_n_layers=1):
+    def __init__(self, vocab_size, emb_dim, hidden_dim, max_dec_len, enc_n_layers=1, dec_n_layers=1, max_oovs=0):
         super(PointerGenerator, self).__init__()
         self.hidden_dim = hidden_dim
         self.encoder = Encoder(vocab_size, emb_dim, hidden_dim, enc_n_layers)
         self.decoder = Decoder(vocab_size, emb_dim, hidden_dim, dec_n_layers)
         self.reducer = ReduceState(hidden_dim)
+        self.max_dec_len = max_dec_len
+        self.max_oovs = max_oovs
     
-    def forward(self, source, target, max_dec_len, cov_coef=1.0):
+    def forward(self, source, target, source_extend_vocab, pad_id=0, cov_coef=1.0):
         src_lens = [seq.size(0) for seq in source]
-        source = pad_sequence(source, batch_first=True)
+        source = pad_sequence(source, batch_first=True) # by unk token
         h, enc_hidden_state = self.encoder(source, src_lens)
         enc_hidden_state = self.reducer(enc_hidden_state) # enc_hidden, enc_cell
         
         # init coverage
         c_t_pre = h.new(h.size(0), 2*self.hidden_dim)
         coverage = h.new(h.size(0), h.size(1)).zero_()
+        extra_zeros = None
+        if self.max_oovs > 0:
+            extra_zeros = Variable(torch.zeros(h.size(0), self.max_oovs))
+            if h.get_device() >= 0:
+                extra_zeros = extra_zeros.to(h.get_device())
         
         step_losses = []
-        for step in range(max_dec_len):
+        for step in range(self.max_dec_len):
             y_t_pre = target[:,step]
-            P_w, attn_dist, next_coverage = self.decoder(h, enc_hidden_state, y_t_pre, c_t_pre, coverage)
+            P_w, attn_dist, next_coverage = self.decoder(h, enc_hidden_state, y_t_pre, c_t_pre, coverage, extra_zeros, source_extend_vocab)
             # Get probability corresponding to target label
             P_w = torch.gather(P_w, 1, y_t_pre.unsqueeze(1)).squeeze()
             covloss = torch.sum(torch.min(attn_dist, coverage), dim=1)
@@ -200,15 +212,17 @@ class PointerGenerator(nn.Module):
             step_losses.append(lm_loss + cov_coef*covloss)
             coverage = next_coverage
         
-        loss = torch.sum(torch.stack(step_losses, 1), 1)
+        dec_pad_var = self.max_dec_len - torch.sum(torch.eq(target, pad_id), dim=-1)
         
-            
+        loss = torch.sum(torch.stack(step_losses, 1), 1) # B
         
+        return torch.mean(loss / dec_pad_var)
+
         
 if __name__=='__main__':
     x = torch.LongTensor([[1,2,3],[3,4,5],[2,1,3],[4,1,2]]) # 4 x 3 - B x L
     y = torch.LongTensor([[1,2,3],[3,4,5],[2,1,3],[4,1,2]]) # 4 x 3 - B x L
-    model = PointerGenerator(100, emb_dim=40, hidden_dim=60)
-    model(x, y, 3)
+    model = PointerGenerator(100, emb_dim=40, hidden_dim=60, max_dec_len=3)
+    print(model(x, y, x))
     
     

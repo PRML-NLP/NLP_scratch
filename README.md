@@ -1,6 +1,5 @@
 # NLP_scratch
 NLP codes implemented with Pytorch (w/o library such as huggingface)
-
 ~~~
 scripts
 ├── models: Neural Network models
@@ -10,4 +9,3 @@ scripts
 └── <train_[task_name].py>... ex) train_summarization.py
 └── utils: codes for utility and processing operation such as TF-IDF and crawler
 ~~~
-
